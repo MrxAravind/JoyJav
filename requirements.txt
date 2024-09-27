@@ -1,7 +1,7 @@
-git+https://github.com/Hrishi2861/pyrofork-2.2.11-peer-fix.git 
-TgCrypto
+git+https://github.com/Hrishi2861/pyrofork-2.2.11-peer-fix.git
 flask
 bs4
 requests
 python-dotenv
 Pillow
+TgCrypto
