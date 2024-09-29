@@ -188,7 +188,6 @@ async def extract_onejav():
 
         for tag in a_tags:
             href = tag.get('href')
-            # Extracting torrent links
             if href and ".torrent" in href:
                 try:
                     full_torrent_url = urljoin(base_url, href)
@@ -196,7 +195,7 @@ async def extract_onejav():
                     image_url = [
                         img.get('src') for img in imgs if any(ext in img.get('src') for ext in ['jpg', 'jpeg', 'png'])
                         and img.get('src').startswith("http") and name.lower() in img.get('src')
-                    ][0]
+                    ]
                     if len(image_url) != 0 and full_torrent_url not in [data['torrent'] for data in torrent_data]:
                         #image_url = 
                         logging.info(next((img for img in image_url if await safe_requests(img)), None))
@@ -224,6 +223,7 @@ async def extract_onejav():
                     #logging.info(f"Found torrent: {full_torrent_url}, name: {name}, image: {image_url}")
                 except Exception as e:
                     logging.error(f"Error processing torrent link: {name}-{full_torrent_url} - {image_url}: {e}")
+                    raise e
                 
 
     # Start scraping both tag and actress pages
