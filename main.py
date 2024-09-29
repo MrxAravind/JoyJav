@@ -108,6 +108,7 @@ async def scrape_torrents_and_images(app, url):
                         ]
                         if len(image_url) != 0:
                             image_url = next((img for img in image_url if await safe_requests(img)), None)
+                            logging.info(image_url)
                             if image_url and not check_db(db, collection_name, name):
                                 links.append([name, image_url, full_torrent_url])
                                 await upload_image(app, name, image_url, full_torrent_url)
@@ -195,9 +196,11 @@ async def extract_onejav():
                     image_url = [
                         img.get('src') for img in imgs if any(ext in img.get('src') for ext in ['jpg', 'jpeg', 'png'])
                         and img.get('src').startswith("http") and name.lower() in img.get('src')
-                    ]
+                    ][0]
                     if len(image_url) != 0 and full_torrent_url not in [data['torrent'] for data in torrent_data]:
-                        image_url = next((img for img in image_url if await safe_requests(img)), None)[0]
+                        #image_url = 
+                        logging.info(next((img for img in image_url if await safe_requests(img)), None))
+                        logging.info(image_url)
                         if image_url and not check_db(db, collection_name, name):
                             torrent_data.append({
                                 "name": name,
