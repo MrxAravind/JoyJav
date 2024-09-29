@@ -191,11 +191,7 @@ async def extract_onejav():
             if href and ".torrent" in href:
                 try:
                     full_torrent_url = urljoin(base_url, href)
-                    
-                    # Extract name from the URL structure
                     name = href.split("/")[2]  # Assuming the name is the 3rd part of the URL structure
-                    
-                    # Extract the first valid image associated with this torrent
                     image_url = [
                         img.get('src') for img in imgs if any(ext in img.get('src') for ext in ['jpg', 'jpeg', 'png'])
                         and img.get('src').startswith("http") and name.lower() in img.get('src')
@@ -223,9 +219,10 @@ async def extract_onejav():
                                 await asyncio.sleep(2)
                             logging.info(update_message)
                             logging.info(f"NAME : {name}")
-                    logging.info(f"Found torrent: {full_torrent_url}, name: {name}, image: {image_url}")
+                    #logging.info(f"Found torrent: {full_torrent_url}, name: {name}, image: {image_url}")
                 except Exception as e:
-                    logging.error(f"Error processing torrent link {href}: {e}")
+                    logging.error(f"Error processing torrent link {href} | {name}-{full_torrent_url} - {image_url}: {e}")
+                
 
     # Start scraping both tag and actress pages
     logging.info("Processing Tag Pages...")
@@ -254,7 +251,6 @@ def download_and_compress_image(img_url, save_path=None):
                 for chunk in response.iter_content(1024):
                     f.write(chunk)
             with Image.open(save_path) as img:
-                # Convert RGBA to RGB if necessary
                 if img.mode == "RGBA":
                     img = img.convert("RGB")
                 img.save(save_path, "JPEG")
@@ -267,7 +263,6 @@ def download_and_compress_image(img_url, save_path=None):
         return None
 
 async def upload_image(app, name, image_url, url):
-    logging.info(f"Sending : {name}")
     local_path = None
     try:
         local_path = download_and_compress_image(image_url)
@@ -281,7 +276,7 @@ async def upload_image(app, name, image_url, url):
             )
             result = {"ID": message.id, "NAME": name, "IMG": image_url, "TORRENT": url}
             insert_document(db, collection_name, result)
-            logging.info(f"Sent : {name}")
+            logging.info(f"Posted Jav : {name}")
     except Exception as e:
         logging.error(f"Error processing URL {url}: {e}")
     finally:
@@ -291,11 +286,11 @@ async def upload_image(app, name, image_url, url):
 # Async main function to process torrent links and images
 async def main():
     async with app:
-        while True:
+        if True:
             page = 1
+            logging.info(f"Scraping Page: New Method")
+            torrent_data = await extract_onejav()
             while True:
-                logging.info(f"Scraping Page: New Method")
-                torrent_data = await extract_onejav()
                 pop_url = f"https://onejav.com/popular/?page={page}"
                 logging.info(f"Scraping Page : {pop_url}")
                 links = await scrape_torrents_and_images(app, pop_url)
@@ -304,13 +299,10 @@ async def main():
                 page += 1
             logging.info(f"Scraping Page : Home")
             base_url = 'https://onejav.com'
-            
             links = await scrape_torrents_and_images(app, base_url)
             random_url = "https://onejav.com/random"
             for i in range(5):
                 links = await scrape_torrents_and_images(app, random_url)
-            act_link = "https://onejav.com/actress"
-            links = await scrape_torrents_and_images(app, act_link)
             logging.info("Sleeping for 1 Hour....")
             await asyncio.sleep(3600)  # Sleep for 1 hour
 
