@@ -196,8 +196,7 @@ async def extract_onejav():
                         img.get('src') for img in imgs if any(ext in img.get('src') for ext in ['jpg', 'jpeg', 'png'])
                         and img.get('src').startswith("http") and name.lower() in img.get('src')
                     ]
-                    image_url = image_url[0] if image_url else None  # Use the first valid image
-
+                    image_url = next((img for img in image_url if await safe_requests(img)), None)
                     if full_torrent_url not in [data['torrent'] for data in torrent_data]:
                         if image_url and not check_db(db, collection_name, name):
                             torrent_data.append({
