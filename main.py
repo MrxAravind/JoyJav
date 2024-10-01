@@ -38,7 +38,8 @@ collection_name = COLLECTION_NAME
 # Pyrogram client
 app = Client("SpidyJav", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10)
 
-async def safe_requests(url, retries=3):
+
+def safe_requests(url, retries=3):
     for attempt in range(retries):
         try:
             response = requests.get(url, timeout=10)
@@ -48,7 +49,7 @@ async def safe_requests(url, retries=3):
             logging.error(f"Attempt {attempt + 1} failed for {url}: {e}")
             if attempt == retries - 1:
                 return None  # Return None after exhausting retries
-            await asyncio.sleep(2)  # Wait before retrying
+            time.sleep(2)  # Wait before retrying
 
 # Get image URLs and torrent links from a Jav Website
 async def scrape_torrents_and_images(app, url):
@@ -56,7 +57,7 @@ async def scrape_torrents_and_images(app, url):
     routes = []
     base_url = 'https://onejav.com'
     try:
-        response = await safe_requests(url)
+        response = safe_requests(url)
         if response is None:
             logging.error(f"Failed to fetch base URL {base_url}")
             return links
@@ -72,7 +73,7 @@ async def scrape_torrents_and_images(app, url):
                 routes.append(href)
             elif href and "/actress/" in href and "/actress/" != href:
                 try:
-                    sub_response = await safe_requests(base_url + href)
+                    sub_response = safe_requests(base_url + href)
                     if sub_response is None:
                         logging.error(f"Failed to fetch actress page {href}")
                         continue
@@ -89,7 +90,7 @@ async def scrape_torrents_and_images(app, url):
         # Process each route to extract torrent links and associated images
         for route in routes:
             try:
-                response = await safe_requests(base_url + route)
+                response = safe_requests(base_url + route)
                 if response is None:
                     logging.error(f"Failed to fetch route {route}")
                     continue
@@ -107,7 +108,7 @@ async def scrape_torrents_and_images(app, url):
                             and img.startswith("http")
                         ]
                         if len(image_url) != 0:
-                            image_url = next((img for img in image_url if await safe_requests(img)), None)
+                            image_url = next((img for img in image_url if safe_requests(img)), None)
                             logging.info(image_url)
                             if image_url and not check_db(db, collection_name, name):
                                 links.append([name, image_url, full_torrent_url])
@@ -197,8 +198,7 @@ async def extract_onejav():
                         and img.get('src').startswith("http") and name.lower() in img.get('src')
                     ]
                     if len(image_url) != 0 and full_torrent_url not in [data['torrent'] for data in torrent_data]:
-                        #image_url = 
-                        logging.info(next((img for img in image_url if await safe_requests(img)), None))
+                        image_url = next((img for img in image_url if safe_requests(img)), None)
                         logging.info(image_url)
                         if image_url and not check_db(db, collection_name, name):
                             torrent_data.append({
