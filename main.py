@@ -136,7 +136,7 @@ async def extract_onejav():
 
     # Function to fetch and parse a URL
     async def fetch_page(url):
-        response = await safe_requests(url)
+        response = safe_requests(url)
         return BeautifulSoup(response.content, 'html.parser') if response else None
 
     # Process tag pages
