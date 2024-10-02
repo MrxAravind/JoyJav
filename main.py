@@ -271,7 +271,6 @@ async def upload_image(app, name, image_url, category,url):
             )
             result = {"ID": message.id, "NAME": name, "IMG": image_url, "TORRENT": url}
             insert_document(db, collection_name, result)
-            logging.info(f"Posted Jav : {name}")
     except Exception as e:
         logging.error(f"Error processing URL {url}: {e}")
     finally:
@@ -283,8 +282,6 @@ async def main():
     async with app:
         if True:
             page = 1
-            logging.info(f"Scraping Page: New Method")
-            torrent_data = await extract_onejav()
             while True:
                 pop_url = f"https://onejav.com/popular/?page={page}"
                 logging.info(f"Scraping Page : {pop_url}")
@@ -295,6 +292,8 @@ async def main():
             logging.info(f"Scraping Page : Home")
             base_url = 'https://onejav.com'
             links = await scrape_torrents_and_images(app, base_url,"Home Page")
+            logging.info(f"Scraping Page: New Method")
+            torrent_data = await extract_onejav()
             random_url = "https://onejav.com/random"
             for i in range(5):
                 links = await scrape_torrents_and_images(app, random_url,"Random Videos")
