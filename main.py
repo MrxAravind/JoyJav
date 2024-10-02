@@ -52,7 +52,7 @@ def safe_requests(url, retries=3):
             time.sleep(2)  # Wait before retrying
 
 # Get image URLs and torrent links from a Jav Website
-async def scrape_torrents_and_images(app, url):
+async def scrape_torrents_and_images(app, url,category):
     links = []
     routes = []
     base_url = 'https://onejav.com'
@@ -112,7 +112,7 @@ async def scrape_torrents_and_images(app, url):
                             logging.info(image_url)
                             if image_url and not check_db(db, collection_name, name):
                                 links.append([name, image_url, full_torrent_url])
-                                await upload_image(app, name, image_url, full_torrent_url)
+                                await upload_image(app, name, image_url,category, full_torrent_url)
                             else:
                                 data = get_info(db, collection_name, name)
                                 query = {"NAME": data["NAME"]}
@@ -121,11 +121,9 @@ async def scrape_torrents_and_images(app, url):
                                 if data["TORRENT"] != full_torrent_url:
                                     now = datetime.now()
                                     date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                                    cap = f"Name: {name.upper()}\n[Torrent]({full_torrent_url})\nDate & Time: {date_time_str}"
+                                    cap = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({full_torrent_url})\nDate & Time: {date_time_str}"
                                     await app.edit_message_caption(LOG_ID, data["ID"], cap)
                                     await asyncio.sleep(2)
-                                logging.info(update_message)
-                                logging.info(f"NAME : {name}")
             except Exception as e:
                 logging.error(f"Error processing route {route}: {e}")
     except Exception as e:
@@ -158,7 +156,7 @@ async def extract_onejav():
                 try:
                     tag_soup = await fetch_page(full_url)
                     if tag_soup:
-                        await extract_torrent_links_images_and_names(tag_soup)
+                        await extract_torrent_links_images_and_names("Tags",tag_soup)
                 except Exception as e:
                     logging.error(f"Error processing tag page {full_url}: {e}")
 
@@ -178,12 +176,12 @@ async def extract_onejav():
                 try:
                     actress_soup = await fetch_page(full_url)
                     if actress_soup:
-                        await extract_torrent_links_images_and_names(actress_soup)
+                        await extract_torrent_links_images_and_names("Actress",actress_soup)
                 except Exception as e:
                     logging.error(f"Error processing actress page {full_url}: {e}")
 
     # Extract torrent links, associated images, and names from a soup object
-    async def extract_torrent_links_images_and_names(soup):
+    async def extract_torrent_links_images_and_names(category,soup):
         a_tags = soup.find_all('a')
         imgs = soup.find_all('img')
 
@@ -199,14 +197,13 @@ async def extract_onejav():
                     ]
                     if len(image_url) != 0 and full_torrent_url not in [data['torrent'] for data in torrent_data]:
                         image_url = next((img for img in image_url if safe_requests(img)), None)
-                        logging.info(image_url)
                         if image_url and not check_db(db, collection_name, name):
                             torrent_data.append({
                                 "name": name,
                                 "torrent": full_torrent_url,
                                 "image": image_url
                             })
-                            await upload_image(app, name, image_url, full_torrent_url)
+                            await upload_image(app, name, image_url, category,full_torrent_url)
                         else:
                             data = get_info(db, collection_name, name)
                             query = {"NAME": data["NAME"]}
@@ -215,12 +212,9 @@ async def extract_onejav():
                             if data["TORRENT"] != full_torrent_url:
                                 now = datetime.now()
                                 date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                                cap = f"Name: {name.upper()}\n[Torrent]({full_torrent_url})\nDate & Time: {date_time_str}"
+                                cap = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({full_torrent_url})\nDate & Time: {date_time_str}"
                                 await app.edit_message_caption(LOG_ID, data["ID"], cap)
                                 await asyncio.sleep(2)
-                            logging.info(update_message)
-                            logging.info(f"NAME : {name}")
-                    #logging.info(f"Found torrent: {full_torrent_url}, name: {name}, image: {image_url}")
                 except Exception as e:
                     logging.error(f"Error processing torrent link: {name}-{full_torrent_url} - {image_url}: {e}")
                     raise e
@@ -264,14 +258,14 @@ def download_and_compress_image(img_url, save_path=None):
         logging.error(f"Failed to download or compress image {img_url}: {e}")
         return None
 
-async def upload_image(app, name, image_url, url):
+async def upload_image(app, name, image_url, category,url):
     local_path = None
     try:
         local_path = download_and_compress_image(image_url)
         if local_path:
             now = datetime.now()
             date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            cap = f"Name: {name.upper()}\n[Torrent]({url})\nDate & Time: {date_time_str}"
+            cap = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({url})\nDate & Time: {date_time_str}"
             message = await app.send_photo(
                 LOG_ID, photo=local_path,
                 caption=cap
@@ -295,16 +289,16 @@ async def main():
             while True:
                 pop_url = f"https://onejav.com/popular/?page={page}"
                 logging.info(f"Scraping Page : {pop_url}")
-                links = await scrape_torrents_and_images(app, pop_url)
+                links = await scrape_torrents_and_images(app, pop_url,"Popular")
                 if len(links) == 0:
                     break
                 page += 1
             logging.info(f"Scraping Page : Home")
             base_url = 'https://onejav.com'
-            links = await scrape_torrents_and_images(app, base_url)
+            links = await scrape_torrents_and_images(app, base_url,"Home Page")
             random_url = "https://onejav.com/random"
             for i in range(5):
-                links = await scrape_torrents_and_images(app, random_url)
+                links = await scrape_torrents_and_images(app, random_url,"Random Videos")
             logging.info("Sleeping for 1 Hour....")
             await asyncio.sleep(3600)  # Sleep for 1 hour
 
