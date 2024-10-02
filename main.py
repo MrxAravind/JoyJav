@@ -1,11 +1,10 @@
-import subprocess
 import os
 import logging
 from bs4 import BeautifulSoup
-from pyrogram import Client, filters
+from pyrogram import Client
 from PIL import Image
-from config import *  # Ensure sensitive data like API keys are managed securely
-from database import *  # Make sure the database functions are correctly implemented
+from config import *  # Sensitive data handled here
+from database import *  # Database interaction functions here
 import asyncio
 import time
 import requests
@@ -13,294 +12,153 @@ from alive import keep_alive
 from datetime import datetime
 from urllib.parse import urljoin
 
-# Configure logging to file and console
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("Jav.log"),  # Log to file
-        logging.StreamHandler()  # Log to console
+        logging.FileHandler("Jav.log"),
+        logging.StreamHandler()
     ]
 )
 
-# Suppress Pyrogram logs
-logging.getLogger("pyrogram").setLevel(logging.WARNING)
-logging.getLogger('werkzeug').setLevel(logging.WARNING)
-logging.getLogger('flask').setLevel(logging.WARNING)
+# Silence unnecessary logs
+for module in ["pyrogram", "werkzeug", "flask"]:
+    logging.getLogger(module).setLevel(logging.WARNING)
 
 keep_alive()
 
 # MongoDB setup
-database_name = "Spidydb"
-db = connect_to_mongodb(DATABASE, database_name)
+db = connect_to_mongodb(DATABASE, "Spidydb")
 collection_name = COLLECTION_NAME
 
-# Pyrogram client
+# Pyrogram client setup
 app = Client("SpidyJav", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10)
 
-
-def safe_requests(url, retries=3):
-    for attempt in range(retries):
+def safe_requests(url, retries=3, timeout=10):
+    """ A generic retry mechanism for making requests. """
+    for _ in range(retries):
         try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()  # Raise an error for bad responses
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
             return response
         except requests.RequestException as e:
-            logging.error(f"Attempt {attempt + 1} failed for {url}: {e}")
-            if attempt == retries - 1:
-                return None  # Return None after exhausting retries
-            time.sleep(2)  # Wait before retrying
+            logging.error(f"Request failed for {url}: {e}")
+            time.sleep(2)
+    return None
 
-# Get image URLs and torrent links from a Jav Website
-async def scrape_torrents_and_images(app, url,category):
-    links = []
-    routes = []
-    base_url = 'https://onejav.com'
-    try:
-        response = safe_requests(url)
-        if response is None:
-            logging.error(f"Failed to fetch base URL {base_url}")
-            return links
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        a_tags = soup.find_all('a')
-        logging.info("Scraper Started...")
-
-        # Find all relevant links
-        for tag in a_tags:
-            href = tag.get('href')
-            if href and "/torrent/" in href:
-                routes.append(href)
-            elif href and "/actress/" in href and "/actress/" != href:
-                try:
-                    sub_response = safe_requests(base_url + href)
-                    if sub_response is None:
-                        logging.error(f"Failed to fetch actress page {href}")
-                        continue
-
-                    sub_soup = BeautifulSoup(sub_response.text, 'html.parser')
-                    sub_a_tags = sub_soup.find_all('a')
-                    for sub_tag in sub_a_tags:
-                        sub_href = sub_tag.get('href')
-                        if sub_href and "/torrent/" in sub_href:
-                            routes.append(sub_href)
-                except Exception as e:
-                    logging.error(f"Error fetching actress page {href}: {e}")
-
-        # Process each route to extract torrent links and associated images
-        for route in routes:
-            try:
-                response = safe_requests(base_url + route)
-                if response is None:
-                    logging.error(f"Failed to fetch route {route}")
-                    continue
-
-                soup = BeautifulSoup(response.text, 'html.parser')
-                a_tags = soup.find_all('a')
-                imgs = [tag.get('src') for tag in soup.find_all('img')]
-                for tag in a_tags:
-                    href = tag.get('href')
-                    if href and ".torrent" in href:
-                        full_torrent_url = base_url + href
-                        name = href.split("/")[2]
-                        image_url = [
-                            img for img in imgs if any(ext in img for ext in ['jpg', 'jpeg', 'png'])
-                            and img.startswith("http")
-                        ]
-                        if len(image_url) != 0:
-                            image_url = next((img for img in image_url if safe_requests(img)), None)
-                            if image_url and not check_db(db, collection_name, name):
-                                links.append([name, image_url, full_torrent_url])
-                                await upload_image(app, name, image_url,category, full_torrent_url)
-                            else:
-                                data = get_info(db, collection_name, name)
-                                query = {"NAME": data["NAME"]}
-                                new_values = {"$set": {"TORRENT": full_torrent_url}}
-                                update_message = update_document(db, collection_name, query, new_values)
-                                if data["TORRENT"] != full_torrent_url:
-                                    now = datetime.now()
-                                    date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                                    cap = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({full_torrent_url})\nDate & Time: {date_time_str}"
-                                    await app.edit_message_caption(LOG_ID, data["ID"], cap)
-                                    await asyncio.sleep(2)
-            except Exception as e:
-                logging.error(f"Error processing route {route}: {e}")
-    except Exception as e:
-        logging.error(f"Error fetching base URL {base_url}: {e}")
-    return links
-
-async def extract_onejav():
-    base_url = "https://onejav.com"
-    tag_url = "https://onejav.com/tag"
-    torrent_data = []
-
-    # Function to fetch and parse a URL
-    async def fetch_page(url):
-        response = safe_requests(url)
-        return BeautifulSoup(response.content, 'html.parser') if response else None
-
-    # Process tag pages
-    async def process_tags(base_page_url):
-        soup = await fetch_page(base_page_url)
-        if not soup:
-            return
-        
-        a_tags = soup.find_all('a')
-        for tag in a_tags:
-            href = tag.get('href')
-            if href and "/tag/" in href and base_page_url not in href:
-                full_url = urljoin(base_page_url, href)
-                logging.info(f"Processing tag page: {full_url}")
-                
-                try:
-                    tag_soup = await fetch_page(full_url)
-                    if tag_soup:
-                        await extract_torrent_links_images_and_names("Tags",tag_soup)
-                except Exception as e:
-                    logging.error(f"Error processing tag page {full_url}: {e}")
-
-    # Process actress pages
-    async def process_actress(base_page_url):
-        soup = await fetch_page(base_page_url)
-        if not soup:
-            return
-        
-        a_tags = soup.find_all('a')
-        for tag in a_tags:
-            href = tag.get('href')
-            if href and "/actress/" in href and base_page_url not in href:
-                full_url = urljoin(base_page_url, href)
-                logging.info(f"Processing actress page: {full_url}")
-                
-                try:
-                    actress_soup = await fetch_page(full_url)
-                    if actress_soup:
-                        await extract_torrent_links_images_and_names("Actress",actress_soup)
-                except Exception as e:
-                    logging.error(f"Error processing actress page {full_url}: {e}")
-
-    # Extract torrent links, associated images, and names from a soup object
-    async def extract_torrent_links_images_and_names(category,soup):
-        a_tags = soup.find_all('a')
-        imgs = soup.find_all('img')
-
-        for tag in a_tags:
-            href = tag.get('href')
-            if href and ".torrent" in href:
-                try:
-                    full_torrent_url = urljoin(base_url, href)
-                    name = href.split("/")[2]  # Assuming the name is the 3rd part of the URL structure
-                    image_url = [
-                        img.get('src') for img in imgs if any(ext in img.get('src') for ext in ['jpg', 'jpeg', 'png'])
-                        and img.get('src').startswith("http") and name.lower() in img.get('src')
-                    ]
-                    if len(image_url) != 0 and full_torrent_url not in [data['torrent'] for data in torrent_data]:
-                        image_url = next((img for img in image_url if safe_requests(img)), None)
-                        if image_url and not check_db(db, collection_name, name):
-                            torrent_data.append({
-                                "name": name,
-                                "torrent": full_torrent_url,
-                                "image": image_url
-                            })
-                            await upload_image(app, name, image_url, category,full_torrent_url)
-                        else:
-                            data = get_info(db, collection_name, name)
-                            query = {"NAME": data["NAME"]}
-                            new_values = {"$set": {"TORRENT": full_torrent_url}}
-                            update_message = update_document(db, collection_name, query, new_values)
-                            if data["TORRENT"] != full_torrent_url:
-                                now = datetime.now()
-                                date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                                cap = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({full_torrent_url})\nDate & Time: {date_time_str}"
-                                await app.edit_message_caption(LOG_ID, data["ID"], cap)
-                                await asyncio.sleep(2)
-                except Exception as e:
-                    logging.error(f"Error processing torrent link: {name}-{full_torrent_url} - {image_url}: {e}")
-                    raise e
-                
-
-    # Start scraping both tag and actress pages
-    logging.info("Processing Tag Pages...")
-    try:
-        await process_tags(tag_url)
-    except Exception as e:
-        logging.error(f"Error processing tag pages: {e}")
-
-    logging.info("Processing Actress Pages...")
-    actress_url = "https://onejav.com/actress"
-    try:
-        await process_actress(actress_url)
-    except Exception as e:
-        logging.error(f"Error processing actress pages: {e}")
-
-    return torrent_data
-
-# Download and compress image
 def download_and_compress_image(img_url, save_path=None):
-    if save_path is None:
-        save_path = f"compressed_{int(time.time())}.jpg"
+    """ Download and compress the image from URL. """
     try:
-        response = requests.get(img_url, stream=True, timeout=10)
-        if response.status_code == 200:
-            with open(save_path, 'wb') as f:
-                for chunk in response.iter_content(1024):
-                    f.write(chunk)
-            with Image.open(save_path) as img:
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                img.save(save_path, "JPEG")
-            return save_path
-        else:
-            logging.error(f"Failed to download image {img_url}, status code: {response.status_code}")
+        save_path = save_path or f"compressed_{int(time.time())}.jpg"
+        response = safe_requests(img_url)
+        if not response:
             return None
+        with open(save_path, 'wb') as f:
+            for chunk in response.iter_content(1024):
+                f.write(chunk)
+        with Image.open(save_path) as img:
+            img = img.convert("RGB") if img.mode == "RGBA" else img
+            img.save(save_path, "JPEG")
+        return save_path
     except Exception as e:
-        logging.error(f"Failed to download or compress image {img_url}: {e}")
+        logging.error(f"Error compressing image {img_url}: {e}")
         return None
 
-async def upload_image(app, name, image_url, category,url):
-    local_path = None
+async def handle_image_upload_or_update(app, name, image_url, category, url):
+    """ Handle both uploading new images and updating existing ones. """
     try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        caption = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({url})\nDate & Time: {now}"
         local_path = download_and_compress_image(image_url)
-        if local_path:
-            now = datetime.now()
-            date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            cap = f"Name: {name.upper()}\nCategory: {category}\n[Torrent]({url})\nDate & Time: {date_time_str}"
-            message = await app.send_photo(
-                LOG_ID, photo=local_path,
-                caption=cap
-            )
-            result = {"ID": message.id, "NAME": name, "IMG": image_url, "TORRENT": url}
-            insert_document(db, collection_name, result)
+        
+        if not local_path:
+            return
+        
+        data = get_info(db, collection_name, name)
+        if data:  # Update existing message
+            if data["TORRENT"] != url:
+                await edit_message_if_different(app, LOG_ID, data["ID"], caption)
+        else:  # Upload new image
+            message = await app.send_photo(LOG_ID, photo=local_path, caption=caption)
+            insert_document(db, collection_name, {"ID": message.id, "NAME": name, "IMG": image_url, "TORRENT": url})
+
     except Exception as e:
-        logging.error(f"Error processing URL {url}: {e}")
+        logging.error(f"Error handling image upload or update: {e}")
     finally:
         if local_path and os.path.exists(local_path):
             os.remove(local_path)
 
-# Async main function to process torrent links and images
+async def edit_message_if_different(app, chat_id, message_id, new_caption):
+    """ Edit message only if the new caption is different from the current one. """
+    try:
+        message = await app.get_messages(chat_id, message_id)
+        if message.caption != new_caption:
+            await app.edit_message_caption(chat_id, message_id, new_caption)
+            logging.info(f"Message {message_id} updated.")
+        else:
+            logging.info(f"Message {message_id} not modified (same content).")
+    except Exception as e:
+        logging.error(f"Error editing message {message_id}: {e}")
+
+async def scrape_torrents_images_from_pages(app, base_url, page_url, category):
+    """ Generic function to scrape torrents and images from pages like tags, actress, and others. """
+    response = safe_requests(page_url)
+    if not response:
+        logging.error(f"Failed to fetch URL: {page_url}")
+        return []
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    logging.info(f"Scraping started for: {page_url}")
+    
+    routes = [tag.get('href') for tag in soup.find_all('a') if "/torrent/" in tag.get('href', '')]
+    
+    # Handle subpages for both tags and actress
+    for tag in soup.find_all('a', href=True):
+        if ("/tag/" in tag['href'] or "/actress/" in tag['href']) and base_url not in tag['href']:
+            sub_response = safe_requests(urljoin(base_url, tag['href']))
+            if not sub_response:
+                continue
+            sub_soup = BeautifulSoup(sub_response.text, 'html.parser')
+            routes += [sub_tag['href'] for sub_tag in sub_soup.find_all('a', href=True) if "/torrent/" in sub_tag['href']]
+
+    # Process found routes
+    for route in routes:
+        try:
+            torrent_page = safe_requests(urljoin(base_url, route))
+            if not torrent_page:
+                continue
+            page_soup = BeautifulSoup(torrent_page.text, 'html.parser')
+            torrent_url = urljoin(base_url, next(tag['href'] for tag in page_soup.find_all('a') if ".torrent" in tag['href']))
+            image_url = next((img['src'] for img in page_soup.find_all('img') if img['src'].startswith("http")), None)
+            name = route.split("/")[2]
+            if image_url:
+                await handle_image_upload_or_update(app, name, image_url, category, torrent_url)
+        except Exception as e:
+            logging.error(f"Error processing {route}: {e}")
+
 async def main():
     async with app:
-        if True:
-            page = 1
-            while True:
-                pop_url = f"https://onejav.com/popular/?page={page}"
-                logging.info(f"Scraping Page : {pop_url}")
-                links = await scrape_torrents_and_images(app, pop_url,"Popular")
-                if len(links) == 0:
-                    break
-                page += 1
-            logging.info(f"Scraping Page : Home")
-            base_url = 'https://onejav.com'
-            links = await scrape_torrents_and_images(app, base_url,"Home Page")
-            logging.info(f"Scraping Page: New Method")
-            torrent_data = await extract_onejav()
-            random_url = "https://onejav.com/random"
-            for i in range(5):
-                links = await scrape_torrents_and_images(app, random_url,"Random Videos")
-            logging.info("Sleeping for 1 Hour....")
-            await asyncio.sleep(3600)  # Sleep for 1 hour
+        # Scrape popular pages
+        page = 1
+        while True:
+            pop_url = f"https://onejav.com/popular/?page={page}"
+            logging.info(f"Scraping popular page: {pop_url}")
+            await scrape_torrents_images_from_pages(app, 'https://onejav.com', pop_url, "Popular")
+            page += 1
 
-# Running the Pyrogram app
+        # Scrape homepage, tags, and actress pages
+        await scrape_torrents_images_from_pages(app, 'https://onejav.com', 'https://onejav.com', "Home Page")
+        await scrape_torrents_images_from_pages(app, 'https://onejav.com', 'https://onejav.com/tag', "Tags")
+        await scrape_torrents_images_from_pages(app, 'https://onejav.com', 'https://onejav.com/actress', "Actress")
+
+        # Scrape random videos
+        for _ in range(5):
+            await scrape_torrents_images_from_pages(app, 'https://onejav.com', "https://onejav.com/random", "Random Videos")
+        
+        logging.info("Sleeping for 1 hour...")
+        await asyncio.sleep(3600)
+
 if __name__ == "__main__":
     logging.info("Bot Started...")
     app.run(main())
