@@ -140,12 +140,10 @@ async def scrape_torrents_images_from_pages(app, base_url, page_url, category):
 async def main():
     async with app:
         # Scrape popular pages
-        page = 1
-        while True:
+        for page in range(1,11):
             pop_url = f"https://onejav.com/popular/?page={page}"
             logging.info(f"Scraping popular page: {pop_url}")
             await scrape_torrents_images_from_pages(app, 'https://onejav.com', pop_url, "Popular")
-            page += 1
 
         # Scrape homepage, tags, and actress pages
         await scrape_torrents_images_from_pages(app, 'https://onejav.com', 'https://onejav.com', "Home Page")
